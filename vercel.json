@@ -12,6 +12,10 @@
   ],
   "routes": [
     {
+      "src": "/api/coze/(.*)",
+      "dest": "/api/index.ts"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/index.ts"
     },

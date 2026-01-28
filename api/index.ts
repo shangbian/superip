@@ -129,6 +129,24 @@ app.use((err: any, req: any, res: any, next: any) => {
 
 // Vercel serverless 函数导出
 export default function handler(req: VercelRequest, res: VercelResponse) {
-    // 将 Vercel 请求转换为 Express 请求
-    return app(req as any, res as any);
+    // 修复路径：Vercel 会将 /api/coze/xxx 路由到这里，但 req.url 可能包含 /api 前缀
+    // 需要移除 /api 前缀，让 Express 路由能正确匹配
+    const originalUrl = req.url || '';
+    let fixedUrl = originalUrl;
+    
+    // 如果路径以 /api 开头，移除它（因为我们已经挂载在 /api/coze）
+    if (fixedUrl.startsWith('/api/')) {
+        fixedUrl = fixedUrl.replace('/api', '');
+    }
+    
+    // 创建修改后的请求对象
+    const modifiedReq = {
+        ...req,
+        url: fixedUrl,
+        originalUrl: fixedUrl,
+        path: fixedUrl.split('?')[0]
+    } as any;
+    
+    // 将修改后的请求传递给 Express
+    return app(modifiedReq, res as any);
 }
