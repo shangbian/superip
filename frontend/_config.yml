@@ -1,0 +1,5 @@
+# GitHub Pages 配置文件
+# 注意：GitHub Pages 只能部署静态文件，后端 API 需要单独部署
+
+# 如果需要使用 GitHub Pages，前端需要配置 API 基础 URL
+# 可以通过环境变量或配置文件来设置
