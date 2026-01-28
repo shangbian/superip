@@ -55,7 +55,16 @@ Vercel 支持全栈部署，可以同时部署前端和后端。
    COZE_TOKEN=你的Token
    COZE_WORKFLOW_ID=7599232922009583626
    PORT=3000
-   CORS_ORIGIN=https://your-vercel-domain.vercel.app
+   CORS_ORIGIN=https://your-vercel-domain.vercel.app,http://localhost:8080
+   ```
+   
+   **重要**：`CORS_ORIGIN` 支持多个域名，用逗号分隔。部署后会自动获取 Vercel 域名，建议配置为：
+   ```
+   CORS_ORIGIN=https://your-vercel-domain.vercel.app,https://*.vercel.app,http://localhost:8080
+   ```
+   或者使用通配符 `*`（不推荐生产环境）：
+   ```
+   CORS_ORIGIN=*
    ```
 7. 点击 **Deploy**
 8. 等待部署完成
@@ -85,7 +94,7 @@ vercel --prod
 | `COZE_TOKEN` | Coze API Token | `pat_xxx...` |
 | `COZE_WORKFLOW_ID` | 工作流 ID | `7599232922009583626` |
 | `PORT` | 服务器端口（可选） | `3000` |
-| `CORS_ORIGIN` | 允许的跨域来源 | `https://your-domain.vercel.app` |
+| `CORS_ORIGIN` | 允许的跨域来源（支持多个，用逗号分隔） | `https://your-domain.vercel.app,http://localhost:8080` |
 
 ## 🔧 配置说明
 
@@ -96,12 +105,11 @@ vercel --prod
 - `app.js` - 应用逻辑
 
 **API 地址配置**：
-```javascript
-// frontend/app.js
-const API_BASE_URL = 'http://localhost:3003/api/coze'; // 本地开发
-// 或
-const API_BASE_URL = 'https://your-backend.vercel.app/api/coze'; // 生产环境
-```
+前端代码已自动检测环境：
+- **本地开发**：自动使用 `http://localhost:3003/api/coze`
+- **生产环境**：自动使用相对路径 `/api/coze`（前后端同域部署）
+
+如果前后端分离部署，需要手动修改 `frontend/app.js` 中的 `getApiBaseUrl()` 函数。
 
 ### 后端配置
 

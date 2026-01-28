@@ -1,5 +1,16 @@
-// API 配置
-const API_BASE_URL = 'http://localhost:3003/api/coze';
+// API 配置 - 自动检测环境
+// 开发环境使用 localhost，生产环境使用相对路径（同域）或环境变量
+const getApiBaseUrl = () => {
+    // 如果是本地开发环境
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return 'http://localhost:3003/api/coze';
+    }
+    // 生产环境：使用相对路径（如果前后端部署在同一域名下）
+    // 或者使用环境变量配置的 API 地址
+    return '/api/coze';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 // 所有智能体的原始数据（用于提取）
 const allAgentsMap = {

@@ -9,9 +9,22 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// CORS 配置 - 支持多个来源
+const getCorsOrigin = () => {
+    const corsOrigin = process.env.CORS_ORIGIN;
+    
+    // 如果配置了多个来源（用逗号分隔）
+    if (corsOrigin && corsOrigin.includes(',')) {
+        return corsOrigin.split(',').map(origin => origin.trim());
+    }
+    
+    // 单个来源或通配符
+    return corsOrigin || '*';
+};
+
 // 中间件
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: getCorsOrigin(),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
