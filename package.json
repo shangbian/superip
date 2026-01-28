@@ -1,0 +1,15 @@
+{
+  "name": "superip-ai-content-factory",
+  "version": "1.0.0",
+  "description": "超级IP：全链路AI智能内容工厂",
+  "scripts": {
+    "build": "cd backend && npm install && npm run build"
+  },
+  "dependencies": {
+    "@vercel/node": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3"
+  }
+}
