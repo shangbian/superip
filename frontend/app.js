@@ -1,12 +1,10 @@
 // API 配置 - 自动检测环境
-// 开发环境使用 localhost，生产环境使用相对路径（同域）或环境变量
+// 开发环境：与页面同 host，后端端口 3003；生产环境：同域 /api/coze
 const getApiBaseUrl = () => {
-    // 如果是本地开发环境
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        return 'http://localhost:3003/api/coze';
+    var host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return window.location.protocol + '//' + host + ':3003/api/coze';
     }
-    // 生产环境：使用相对路径（如果前后端部署在同一域名下）
-    // 或者使用环境变量配置的 API 地址
     return '/api/coze';
 };
 
@@ -106,6 +104,8 @@ const agentsData = {
 
 let currentAgent = null;
 let agentHistory = {};
+let agentChatMessages = {};
+var agentConversationIds = {};  // 每个智能体当前会话 ID，用于多轮上下文；清空对话时清除
 let searchResults = [];
 let selectedSearchIndex = -1;
 let allAgents = []; // 扁平化的所有智能体列表
@@ -377,7 +377,8 @@ function renderSidebar() {
             if (currentAgent && currentAgent.id === agent.id) {
                 agentItem.classList.add('active');
             }
-            if (agentHistory[agent.id]) {
+            const hasChat = (agentChatMessages[agent.id] && agentChatMessages[agent.id].length > 0);
+            if (hasChat || agentHistory[agent.id]) {
                 agentItem.classList.add('has-history');
             }
             agentItem.innerHTML = `<span class="agent-item-name">${agent.name}</span>`;
@@ -391,80 +392,183 @@ function renderSidebar() {
     }
 }
 
-// 切换智能体（优化版）
-function switchAgent(agent, saveCurrent = true) {
-    console.log('========== switchAgent 开始 ==========');
-    console.log('传入的智能体:', agent);
-    console.log('智能体 ID:', agent?.id, '名称:', agent?.name);
-    
+// 从 inputGuide 提取最多 3 条示例/提示词供用户点击
+function getSuggestedPrompts(agent) {
+    var out = [];
+    if (agent && agent.inputGuide) {
+        var guide = agent.inputGuide;
+        var lines = guide.split(/\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+        for (var i = 0; i < lines.length && out.length < 3; i++) {
+            var line = lines[i];
+            if (line.indexOf('例如') !== -1 || line.indexOf('→') !== -1) {
+                var example = line.replace(/^[^：:]*[：:]?\s*/, '').trim();
+                if (example.length > 5 && example.length < 50) out.push(example);
+            }
+        }
+        if (out.length < 3 && lines.length > 0) {
+            for (var j = 0; j < lines.length && out.length < 3; j++) {
+                var s = lines[j].replace(/^[-*•]\s*/, '').trim();
+                if (s.length >= 8 && s.length <= 40 && out.indexOf(s) === -1) out.push(s);
+            }
+        }
+    }
+    if (out.length === 0) out.push('请直接输入你的需求');
+    return out.slice(0, 3);
+}
+
+// 渲染当前智能体的对话消息（Coze 风格：无消息时显示空状态+引导+提示词）
+function renderChatMessages(agentId) {
+    var container = document.getElementById('chatMessages');
+    var emptyState = document.getElementById('cozeEmptyState');
+    if (!container) return;
+    try {
+        var list = agentChatMessages[agentId];
+        var agent = allAgentsMap[agentId] || allAgents.find(function (a) { return a.id === agentId; });
+
+        if (!list || list.length === 0) {
+            if (emptyState) emptyState.style.display = 'block';
+            container.innerHTML = '';
+            var titleEl = document.getElementById('cozeAgentTitle');
+            var welcomeEl = document.getElementById('cozeWelcomeBubble');
+            var promptsEl = document.getElementById('cozeSuggestedPrompts');
+            if (titleEl && agent) titleEl.textContent = agent.name;
+            var avatarEl = document.getElementById('cozeAgentAvatar');
+            if (avatarEl && agent && typeof agentIcons !== 'undefined' && agentIcons[agent.id]) {
+                var iconSpan = avatarEl.querySelector('.coze-avatar-icon');
+                if (iconSpan) iconSpan.textContent = agentIcons[agent.id];
+            }
+            if (welcomeEl) {
+                var welcome = agent && agent.inputGuide
+                    ? '你好，我是' + (agent.name || '智能体') + '。请根据下方提示输入内容，或直接输入你的需求。'
+                    : '你好，请直接输入你的需求，按发送或 Enter 提交。';
+                welcomeEl.textContent = welcome;
+            }
+            if (promptsEl) {
+                var prompts = getSuggestedPrompts(agent);
+                promptsEl.innerHTML = '';
+                prompts.forEach(function (text) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'coze-prompt-chip';
+                    btn.textContent = text;
+                    btn.onclick = function () { sendChatMessageWithText(text); };
+                    promptsEl.appendChild(btn);
+                });
+            }
+            container.scrollTop = 0;
+            return;
+        }
+
+        if (emptyState) emptyState.style.display = 'none';
+        container.innerHTML = '';
+        list.forEach(function (msg) {
+            var div = document.createElement('div');
+            div.className = 'chat-message ' + msg.role;
+            if (msg.role === 'assistant' && typeof marked !== 'undefined') {
+                div.innerHTML = '<div class="markdown-body">' + marked.parse(msg.content || '') + '</div>';
+            } else {
+                div.textContent = msg.content || '';
+            }
+            container.appendChild(div);
+        });
+        container.scrollTop = container.scrollHeight;
+    } catch (e) {
+        console.warn('renderChatMessages:', e);
+    }
+}
+
+// 流式打字机效果：将最后一条 assistant 消息逐字显示，并显示「停止响应」按钮
+var streamingTimerId = null;
+var streamingStopRequested = false;
+
+function renderWithStreamingEffect(agentId, fullContent, onDone) {
+    var container = document.getElementById('chatMessages');
+    var stopWrap = document.getElementById('cozeStopWrap');
+    var submitBtn = document.getElementById('submitBtn');
+    var loadingEl = document.getElementById('chatLoading');
+    if (!container) { if (onDone) onDone(); return; }
+    if (streamingTimerId) clearInterval(streamingTimerId);
+    streamingStopRequested = false;
+    var list = agentChatMessages[agentId];
+    var idx = list ? list.length - 1 : -1;
+    if (idx < 0 || !list[idx] || list[idx].role !== 'assistant') {
+        if (onDone) onDone();
+        return;
+    }
+    list[idx].content = fullContent;
+    var emptyState = document.getElementById('cozeEmptyState');
+    if (emptyState) emptyState.style.display = 'none';
+    container.innerHTML = '';
+    for (var i = 0; i < list.length - 1; i++) {
+        var msg = list[i];
+        var div = document.createElement('div');
+        div.className = 'chat-message ' + msg.role;
+        if (msg.role === 'assistant' && typeof marked !== 'undefined') {
+            div.innerHTML = '<div class="markdown-body">' + marked.parse(msg.content || '') + '</div>';
+        } else {
+            div.textContent = msg.content || '';
+        }
+        container.appendChild(div);
+    }
+    var streamDiv = document.createElement('div');
+    streamDiv.className = 'chat-message assistant';
+    streamDiv.innerHTML = '<div class="markdown-body"></div>';
+    container.appendChild(streamDiv);
+    var inner = streamDiv.querySelector('.markdown-body');
+    if (stopWrap) stopWrap.style.display = 'block';
+    var pos = 0;
+    var chunk = 15;
+    function tick() {
+        if (streamingStopRequested || pos >= fullContent.length) {
+            clearInterval(streamingTimerId);
+            streamingTimerId = null;
+            inner.innerHTML = typeof marked !== 'undefined' ? marked.parse(fullContent) : fullContent;
+            if (stopWrap) stopWrap.style.display = 'none';
+            if (submitBtn) submitBtn.disabled = false;
+            if (loadingEl) loadingEl.classList.remove('active');
+            container.scrollTop = container.scrollHeight;
+            if (onDone) onDone();
+            return;
+        }
+        pos = Math.min(pos + chunk, fullContent.length);
+        var part = fullContent.substring(0, pos);
+        inner.innerHTML = typeof marked !== 'undefined' ? marked.parse(part) : part;
+        container.scrollTop = container.scrollHeight;
+    }
+    streamingTimerId = setInterval(tick, 40);
+    tick();
+}
+
+function stopStreaming() {
+    streamingStopRequested = true;
+}
+
+// 切换智能体（Coze 风格对话界面）
+function switchAgent(agent, saveCurrent) {
+    if (saveCurrent === undefined) saveCurrent = true;
     if (!agent || !agent.id) {
-        console.error('switchAgent: 无效的智能体对象', agent);
         showToast('切换失败：智能体数据无效', 'error');
         return;
     }
-    
-    // 保存当前智能体状态
-    if (saveCurrent && currentAgent) {
-        const userInput = document.getElementById('userInput').value.trim();
-        const resultCard = document.getElementById('resultCard');
-        const hasOutput = resultCard.classList.contains('active');
-        
-        if (userInput || hasOutput) {
-            if (!agentHistory[currentAgent.id]) {
-                agentHistory[currentAgent.id] = {};
-            }
-            
-            if (userInput) {
-                agentHistory[currentAgent.id].input = userInput;
-            }
-            
-            if (hasOutput && !agentHistory[currentAgent.id].output) {
-                const resultContent = document.getElementById('resultContent');
-                agentHistory[currentAgent.id].output = resultContent.innerText;
-            }
-        }
+    var homepageGuide = document.getElementById('homepageGuide');
+    var agentInfoCard = document.getElementById('agentInfoCard');
+    var selectedAgentName = document.getElementById('selectedAgentName');
+    var userInput = document.getElementById('userInput');
+    if (!agentInfoCard) {
+        showToast('页面结构异常，请刷新后重试', 'error');
+        return;
     }
-
-    // 切换到新智能体
     currentAgent = agent;
-    console.log('已设置 currentAgent:', currentAgent.name);
-    
-    // 隐藏首页指引，显示智能体信息卡片
-    document.getElementById('homepageGuide').style.display = 'none';
-    document.getElementById('agentInfoCard').style.display = 'block';
-    document.getElementById('selectedAgentName').textContent = agent.name;
-    
-    const infoBox = document.getElementById('agentInfoBox');
-    infoBox.innerHTML = `
-        <h3>智能体介绍</h3>
-        <p>${agent.fullDescription.replace(/\n/g, '<br>')}</p>
-        <h3 style="margin-top: 20px;">输入要求</h3>
-        <p>${agent.inputGuide.replace(/\n/g, '<br>')}</p>
-    `;
-
-    // 恢复历史记录
-    const history = agentHistory[agent.id];
-    if (history) {
-        document.getElementById('userInput').value = history.input || '';
-        if (history.output) {
-            displayResult(history.output);
-        } else {
-            document.getElementById('resultCard').classList.remove('active');
-        }
-    } else {
-        document.getElementById('userInput').value = '';
-        document.getElementById('resultCard').classList.remove('active');
-        document.getElementById('resultContent').innerHTML = '';
+    if (homepageGuide) homepageGuide.style.display = 'none';
+    agentInfoCard.style.display = 'flex';
+    if (selectedAgentName) selectedAgentName.textContent = '用户与「' + (agent.name || '智能体') + '」的对话';
+    if (userInput) {
+        userInput.value = '';
+        userInput.placeholder = '发送消息...';
     }
-
-    // 更新侧边栏高亮
+    renderChatMessages(agent.id);
     renderSidebar();
-    
-    // 关闭移动端侧边栏
     closeSidebar();
-
-    console.log('switchAgent 完成，已切换到:', agent.name);
-    console.log('========== switchAgent 结束 ==========');
     showToast('已切换到：' + agent.name, 'success');
 }
 
@@ -474,201 +578,186 @@ function switchAgentPrompt() {
     showToast('在搜索框中输入关键词或从侧边栏选择', 'success');
 }
 
-// 执行工作流
-async function executeWorkflow() {
+// 使用指定文案直接发送（如点击提示气泡时调用，不填入输入框）
+function sendChatMessageWithText(text) {
+    var t = (text || '').trim();
+    if (!t) return;
     if (!currentAgent) {
         showToast('请先选择一个智能体', 'error');
         return;
     }
+    doSendMessage(t);
+}
 
-    const userInput = document.getElementById('userInput').value.trim();
-    if (!userInput) {
-        showToast('请输入您的信息', 'error');
+// 发送对话消息（多轮对话；支持 conversation_id 保持会话）
+function sendChatMessage() {
+    if (!currentAgent) {
+        showToast('请先选择一个智能体', 'error');
         return;
     }
+    var inputEl = document.getElementById('userInput');
+    var userInput = (inputEl && inputEl.value) ? inputEl.value.trim() : '';
+    if (!userInput) {
+        showToast('请输入内容', 'error');
+        return;
+    }
+    if (inputEl) inputEl.value = '';
+    doSendMessage(userInput);
+}
 
-    const submitButton = document.getElementById('submitBtn');
-    const loading = document.getElementById('loading');
-    const resultCard = document.getElementById('resultCard');
+function doSendMessage(userInput) {
+    var id = currentAgent.id;
+    if (!agentChatMessages[id]) agentChatMessages[id] = [];
+    agentChatMessages[id].push({ role: 'user', content: userInput });
+    renderChatMessages(id);
 
-    submitButton.disabled = true;
-    submitButton.textContent = '生成中...';
-    loading.classList.add('active');
-    resultCard.classList.remove('active');
+    var submitBtn = document.getElementById('submitBtn');
+    var loadingEl = document.getElementById('chatLoading');
+    if (submitBtn) submitBtn.disabled = true;
+    if (loadingEl) loadingEl.classList.add('active');
 
-    try {
-        const response = await fetch(`${API_BASE_URL}/workflow/execute`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                choice: currentAgent.id,
-                userInput: userInput,
-                topic: userInput  // 将USER_INPUT的值赋给topic
-            })
-        });
+    var history = agentChatMessages[id].slice(0, -1).map(function (m) { return { role: m.role, content: m.content }; });
+    var convId = agentConversationIds[id] || undefined;
 
-        const data = await response.json();
-        console.log('后端返回数据:', data);
-
+    fetch(API_BASE_URL + '/workflow/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            choice: currentAgent.id,
+            userInput: userInput,
+            topic: userInput,
+            history: history,
+            conversation_id: convId
+        })
+    })
+    .then(function (response) { return response.json(); })
+    .then(function (data) {
         if (data.success && data.data) {
-            let outputContent = data.data.output || '';
-            
-            // 检查是否是错误消息
-            if (outputContent && outputContent.includes('响应数据格式异常')) {
-                console.error('后端返回格式异常:', data);
-                showToast('数据响应格式异常，请查看浏览器控制台和后端日志', 'error');
-                // 显示详细错误信息
-                displayResult(`## ⚠️ 数据响应格式异常\n\n**错误信息：** ${outputContent}\n\n**请检查：**\n1. 后端控制台日志中的完整响应数据\n2. Coze API 返回的数据格式是否已变更\n3. 工作流配置是否正确\n\n**原始响应数据（前1000字符）：**\n\`\`\`json\n${JSON.stringify(data.data.raw || data.data, null, 2).substring(0, 1000)}\n\`\`\``);
+            var outputContent = (data.data.output || '').trim();
+            if (data.data.conversation_id) agentConversationIds[id] = data.data.conversation_id;
+            if (outputContent && outputContent.indexOf('响应数据格式异常') === -1) {
+                agentChatMessages[id].push({ role: 'assistant', content: outputContent });
+                if (currentAgent && currentAgent.id === id) agentHistory[id] = { output: outputContent };
+                if (loadingEl) loadingEl.classList.remove('active');
+                renderWithStreamingEffect(id, outputContent, function () {
+                    renderSidebar();
+                    showToast('回复完成', 'success');
+                });
                 return;
             }
-            
-            if (outputContent && outputContent.trim() !== '') {
-                agentHistory[currentAgent.id] = {
-                    input: userInput,
-                    output: outputContent,
-                    timestamp: new Date().toISOString()
-                };
-                
-                displayResult(outputContent);
-                renderSidebar(); // 更新历史记录标识
-                showToast('内容生成成功！', 'success');
-            } else {
-                console.warn('生成内容为空，完整响应:', data);
-                showToast('生成内容为空，请查看控制台', 'error');
-                // 显示原始数据以便调试
-                displayResult(`## ⚠️ 生成内容为空\n\n**响应数据：**\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
-            }
+            var errMsg = outputContent || data.message || '生成内容为空';
+            agentChatMessages[id].push({ role: 'assistant', content: '⚠️ ' + errMsg });
+            showToast(errMsg.substring(0, 50), 'error');
         } else {
-            console.error('API返回失败:', data);
-            const errorMessage = data.message || '未知错误';
-            showToast('生成失败：' + errorMessage, 'error');
-            
-            // 显示详细错误信息
-            let errorDetails = `## ❌ 生成失败\n\n**错误信息：** ${errorMessage}\n\n`;
-            
-            // 如果是超时错误，显示友好的提示
-            if (errorMessage.includes('超时') || errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
-                errorDetails += `**可能的原因：**\n1. 工作流执行时间较长，超过了预设的超时时间\n2. 工作流中包含复杂的处理逻辑或大量数据处理\n3. 网络连接不稳定导致响应延迟\n\n`;
-                errorDetails += `**建议解决方案：**\n1. 稍后重试（工作流可能需要更长时间才能完成）\n2. 检查工作流配置，优化长时间运行的操作\n3. 如果问题持续存在，请联系管理员检查工作流配置\n4. 可以尝试简化输入内容，减少处理时间\n\n`;
-            }
-            // 如果是 Coze API 错误，显示更详细的信息
-            else if (errorMessage.includes('Missing required parameters') || errorMessage.includes('缺少必需参数')) {
-                errorDetails += `**可能的原因：**\n1. 工作流配置中定义了必需参数，但请求中未提供\n2. parameters 对象中缺少工作流需要的参数\n3. 请检查工作流的输入节点配置，确认需要哪些参数\n\n`;
-                errorDetails += `**建议解决方案：**\n1. 检查工作流配置，查看输入节点定义的必需参数\n2. 确保 parameters 对象包含所有必需字段\n3. 查看后端控制台日志中的完整请求和响应数据\n\n`;
-            }
-            
-            if (data.error) {
-                errorDetails += `**错误详情：**\n\`\`\`json\n${JSON.stringify(data.error, null, 2)}\n\`\`\`\n\n`;
-            }
-            
-            errorDetails += `**完整响应数据：**\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
-            
-            displayResult(errorDetails);
+            var msg = data.message || '请求失败';
+            agentChatMessages[id].push({ role: 'assistant', content: '❌ ' + msg });
+            showToast(msg, 'error');
         }
-    } catch (error) {
-        console.error('API调用失败:', error);
-        showToast('网络请求失败：' + error.message, 'error');
-    } finally {
-        submitButton.disabled = false;
-        submitButton.textContent = '生成内容';
-        loading.classList.remove('active');
-    }
+        renderChatMessages(id);
+        renderSidebar();
+        if (submitBtn) submitBtn.disabled = false;
+        if (loadingEl) loadingEl.classList.remove('active');
+    })
+    .catch(function (err) {
+        var msg = err && err.message ? err.message : '请稍后重试';
+        if (msg === 'Failed to fetch' || msg.indexOf('fetch') !== -1) {
+            msg = '无法连接后端服务，请确认后端已启动（端口 3003）';
+        }
+        agentChatMessages[id].push({ role: 'assistant', content: '❌ 网络错误：' + msg });
+        showToast('请求失败，请检查后端是否已启动', 'error');
+        renderChatMessages(id);
+        renderSidebar();
+        if (submitBtn) submitBtn.disabled = false;
+        if (loadingEl) loadingEl.classList.remove('active');
+    });
 }
 
-// 显示结果
-function displayResult(content) {
-    const resultCard = document.getElementById('resultCard');
-    const resultContent = document.getElementById('resultContent');
-
-    resultContent.innerHTML = marked.parse(content);
-    resultCard.classList.add('active');
-    resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-// 复制结果
+// 复制当前对话最后一条助手回复
 function copyResult() {
-    const resultContent = document.getElementById('resultContent');
-    const textToCopy = resultContent.innerText;
-
-    navigator.clipboard.writeText(textToCopy).then(() => {
-        showToast('内容已复制到剪贴板！', 'success');
-    }).catch(err => {
-        console.error('复制失败:', err);
-        showToast('复制失败，请手动复制', 'error');
-    });
+    if (!currentAgent || !agentChatMessages[currentAgent.id]) {
+        showToast('暂无内容可复制', 'error');
+        return;
+    }
+    var list = agentChatMessages[currentAgent.id];
+    for (var i = list.length - 1; i >= 0; i--) {
+        if (list[i].role === 'assistant') {
+            navigator.clipboard.writeText(list[i].content).then(function () {
+                showToast('已复制到剪贴板', 'success');
+            }).catch(function (err) {
+                showToast('复制失败', 'error');
+            });
+            return;
+        }
+    }
+    showToast('暂无回复可复制', 'error');
 }
 
-// 复制结果（包含输入）
+// 复制当前对话全文（智能体名 + 所有消息）
 function copyResultWithInput() {
-    if (!currentAgent) return;
-    
-    const userInput = document.getElementById('userInput').value;
-    const resultContent = document.getElementById('resultContent');
-    const outputText = resultContent.innerText;
-    
-    const fullText = `【智能体】${currentAgent.name}\n\n【用户输入】\n${userInput}\n\n【生成结果】\n${outputText}`;
-    
-    navigator.clipboard.writeText(fullText).then(() => {
-        showToast('完整内容已复制到剪贴板！', 'success');
-    }).catch(err => {
-        console.error('复制失败:', err);
-        showToast('复制失败，请手动复制', 'error');
+    if (!currentAgent || !agentChatMessages[currentAgent.id]) {
+        showToast('暂无对话可复制', 'error');
+        return;
+    }
+    var lines = ['【智能体】' + currentAgent.name, ''];
+    agentChatMessages[currentAgent.id].forEach(function (m) {
+        lines.push((m.role === 'user' ? '用户：' : '助手：') + '\n' + (m.content || ''));
+        lines.push('');
+    });
+    navigator.clipboard.writeText(lines.join('\n').trim()).then(function () {
+        showToast('对话已复制到剪贴板', 'success');
+    }).catch(function () {
+        showToast('复制失败', 'error');
     });
 }
 
-// 清空当前智能体的历史记录
+// 清空当前智能体的对话记录
 function clearCurrentHistory() {
     if (!currentAgent) {
         showToast('请先选择一个智能体', 'error');
         return;
     }
-    
-    if (confirm('确定要清空当前智能体的输入和输出记录吗？')) {
+    if (confirm('确定要清空与「' + currentAgent.name + '」的对话记录吗？')) {
         delete agentHistory[currentAgent.id];
+        delete agentChatMessages[currentAgent.id];
+        delete agentConversationIds[currentAgent.id];
         document.getElementById('userInput').value = '';
-        document.getElementById('resultCard').classList.remove('active');
-        document.getElementById('resultContent').innerHTML = '';
+        renderChatMessages(currentAgent.id);
         renderSidebar();
-        showToast('历史记录已清空', 'success');
+        showToast('对话已清空', 'success');
     }
 }
 
 // 清空所有历史记录
 function clearAllHistory() {
-    const historyCount = Object.keys(agentHistory).length;
-    
-    if (historyCount === 0) {
+    var count = Object.keys(agentChatMessages).length || Object.keys(agentHistory).length;
+    if (count === 0) {
         showToast('当前没有历史记录', 'error');
         return;
     }
-    
-    if (confirm(`确定要清空所有智能体的历史记录吗？\n当前共有 ${historyCount} 个智能体有保存的记录。`)) {
+    if (confirm('确定要清空所有智能体的对话记录吗？共 ' + count + ' 个。')) {
         agentHistory = {};
+        agentChatMessages = {};
+        agentConversationIds = {};
         document.getElementById('userInput').value = '';
-        document.getElementById('resultCard').classList.remove('active');
-        document.getElementById('resultContent').innerHTML = '';
+        if (currentAgent) renderChatMessages(currentAgent.id);
         renderSidebar();
-        showToast(`已清空所有历史记录（${historyCount}个）`, 'success');
+        showToast('已清空所有记录', 'success');
     }
 }
 
 // 显示历史记录面板
 function showHistoryPanel() {
-    const historyCount = Object.keys(agentHistory).length;
+    var ids = new Set(Object.keys(agentChatMessages).concat(Object.keys(agentHistory)));
+    var historyCount = ids.size;
     if (historyCount === 0) {
         showToast('当前没有历史记录', 'error');
         return;
     }
-    
-    let message = `共有 ${historyCount} 个智能体有历史记录：\n\n`;
-    for (const [agentId, history] of Object.entries(agentHistory)) {
-        const agent = allAgents.find(a => a.id === parseInt(agentId));
-        if (agent) {
-            message += `• ${agent.name}\n`;
-        }
-    }
+    var message = '共有 ' + historyCount + ' 个智能体有对话记录：\n\n';
+    ids.forEach(function (agentId) {
+        var agent = allAgents.find(function (a) { return a.id === parseInt(agentId, 10); });
+        if (agent) message += '• ' + agent.name + '\n';
+    });
     alert(message);
 }
 
@@ -731,17 +820,25 @@ document.addEventListener('keydown', (e) => {
         }
     }
 
-    // Ctrl/Cmd + ←/→: 切换智能体（如果有历史记录）
+    // Ctrl/Cmd + ←/→: 切换智能体
     if ((e.ctrlKey || e.metaKey) && currentAgent) {
         const agentIds = allAgents.map(a => a.id);
         const currentIndex = agentIds.indexOf(currentAgent.id);
-        
         if (e.key === 'ArrowLeft' && currentIndex > 0) {
             e.preventDefault();
             switchAgent(allAgents[currentIndex - 1]);
         } else if (e.key === 'ArrowRight' && currentIndex < allAgents.length - 1) {
             e.preventDefault();
             switchAgent(allAgents[currentIndex + 1]);
+        }
+    }
+
+    // 对话输入框：Enter 发送，Shift+Enter 换行
+    const userInputEl = document.getElementById('userInput');
+    if (userInputEl && document.activeElement === userInputEl && e.key === 'Enter') {
+        if (!e.shiftKey) {
+            e.preventDefault();
+            sendChatMessage();
         }
     }
 });
@@ -949,12 +1046,9 @@ function goToHomepage() {
     // 清空当前智能体
     currentAgent = null;
     
-    // 隐藏智能体信息卡片，显示首页指引
+    // 隐藏对话界面，显示首页指引
     document.getElementById('agentInfoCard').style.display = 'none';
     document.getElementById('homepageGuide').style.display = 'block';
-    
-    // 隐藏结果卡片
-    document.getElementById('resultCard').classList.remove('active');
     
     // 更新侧边栏（取消所有高亮）
     renderSidebar();
@@ -1011,7 +1105,17 @@ function initializePage() {
                 searchResultsEl.classList.remove('active');
             }
         }
-    }, false); // 使用冒泡阶段
+    }, false);
+
+    var sendBtn = document.getElementById('submitBtn');
+    if (sendBtn) {
+        sendBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            if (typeof sendChatMessage === 'function') sendChatMessage();
+        });
+    }
+    var stopBtn = document.getElementById('cozeStopBtn');
+    if (stopBtn) stopBtn.addEventListener('click', function () { if (typeof stopStreaming === 'function') stopStreaming(); });
 }
 
 // 页面加载完成后初始化

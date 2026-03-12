@@ -52,15 +52,18 @@ export class CozeService {
     }
 
     /**
-     * 执行工作流
+     * 执行工作流（支持多轮对话与会话保持）
+     * @param history 可选，多轮历史消息
+     * @param conversationId 可选，首次不传则 API 创建新会话并返回；后续传入以保留上下文
      */
-    async executeWorkflow(choice: number, userInput: string, topic?: string): Promise<any> {
+    async executeWorkflow(choice: number, userInput: string, topic?: string, history?: Array<{ role: string; content: string }>, conversationId?: string): Promise<any> {
         try {
             console.log('准备调用 Coze API...');
             console.log('参数:', { 
                 choice, 
                 userInput: userInput.substring(0, 100) + '...',
-                topic: topic ? topic.substring(0, 100) + '...' : '未提供（将使用 userInput）'
+                topic: topic ? topic.substring(0, 100) + '...' : '未提供（将使用 userInput）',
+                historyLength: history ? history.length : 0
             });
 
             // 构建parameters对象，包含工作流定义的所有必需输入参数
@@ -92,20 +95,31 @@ export class CozeService {
                 throw new Error('userInput 不能为空');
             }
             
-            // 构建请求体，确保包含所有必需参数
+            // 构建请求体
             const requestBody: any = {
                 workflow_id: this.workflowId,
-                parameters: parameters || {} // 确保 parameters 不为 undefined
+                parameters: parameters || {}
             };
+            if (conversationId && conversationId.trim()) {
+                requestBody.conversation_id = conversationId.trim();
+            }
             
-            // 添加 additional_messages（必需参数）
-            // 注意：根据 Coze API 文档，additional_messages 中的消息必须包含 content 字段
-            requestBody.additional_messages = [{
-                content: userInput.trim(),
+            // additional_messages：历史（若有）+ 当前用户输入；有 conversation_id 时 API 会保留上下文
+            const historyMessages = (history && history.length) ? history.map((m: { role: string; content: string }) => ({
+                content: (m.content || '').trim(),
                 content_type: 'text',
-                role: 'user',
-                type: 'question'
-            }];
+                role: m.role === 'assistant' ? 'assistant' : 'user',
+                type: m.role === 'assistant' ? 'answer' : 'question'
+            })).filter((m: any) => m.content) : [];
+            requestBody.additional_messages = [
+                ...historyMessages,
+                {
+                    content: userInput.trim(),
+                    content_type: 'text',
+                    role: 'user',
+                    type: 'question'
+                }
+            ];
             
             // 验证请求体结构
             if (!requestBody.workflow_id) {
@@ -149,13 +163,10 @@ export class CozeService {
             console.log('Coze API 返回数据键:', response.data ? Object.keys(response.data) : 'null');
             console.log('Coze API 返回数据（完整）:', JSON.stringify(response.data, null, 2));
 
-            // 解析响应
             const parsedResult = this.parseResponse(response.data);
-            console.log('解析后的结果:', {
-                hasOutput: !!parsedResult.output,
-                outputLength: parsedResult.output?.length || 0,
-                outputPreview: parsedResult.output?.substring(0, 200) || 'empty'
-            });
+            if (parsedResult.conversation_id) {
+                console.log('会话 ID:', parsedResult.conversation_id);
+            }
             return parsedResult;
 
         } catch (error: any) {
@@ -212,30 +223,22 @@ export class CozeService {
 
         let result: any = {
             output: '',
+            conversation_id: data.conversation_id || (data.data && data.data.conversation_id) || undefined,
             raw: data
         };
 
-        // 情况1: 如果data是字符串（可能是SSE流式响应）
+        // 情况1: SSE 流式响应
         if (typeof data === 'string' || (data.data && typeof data.data === 'string')) {
             const sseData = typeof data === 'string' ? data : data.data;
             console.log('检测到SSE流式响应，开始解析...');
-            
-            // 先检查SSE流中是否包含错误
             if (sseData.includes('"code":4000') || sseData.includes('"code":') || sseData.includes('event: error')) {
-                console.warn('SSE流中包含错误信息，尝试提取错误详情');
                 const errorMatch = sseData.match(/"msg":\s*"([^"]+)"/);
-                if (errorMatch) {
-                    const errorMsg = errorMatch[1];
-                    throw new Error(`Coze API错误: ${errorMsg}`);
-                }
+                if (errorMatch) throw new Error(`Coze API错误: ${errorMatch[1]}`);
             }
-            
-            result.output = this.parseSSEResponse(sseData);
-            
-            if (result.output) {
-                console.log('SSE解析成功，输出长度:', result.output.length);
-                return result;
-            }
+            const parsed = this.parseSSEResponse(sseData);
+            result.output = parsed.output;
+            if (parsed.conversation_id) result.conversation_id = parsed.conversation_id;
+            if (result.output) return result;
         }
 
         // 情况2: 标准JSON响应 - 深度遍历查找可能的输出内容
@@ -348,18 +351,26 @@ export class CozeService {
     }
 
     /**
-     * 解析SSE（Server-Sent Events）流式响应
+     * 解析SSE流式响应，返回 { output, conversation_id? }
      */
-    private parseSSEResponse(sseText: string): string {
-        console.log('解析SSE流，原始长度:', sseText.length);
-        console.log('SSE流前500字符:', sseText.substring(0, 500));
-        
-        // SSE格式: event: xxx\ndata: {...}\n\n
+    private parseSSEResponse(sseText: string): { output: string; conversation_id?: string } {
         const lines = sseText.split('\n');
         let content = '';
         let currentEvent = '';
-        // 用于跟踪已添加的内容片段，避免重复
+        let conversationId: string | undefined;
         const contentFragments = new Set<string>();
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.startsWith('data:')) {
+                try {
+                    const jsonStr = line.substring(5).trim();
+                    if (jsonStr) {
+                        const obj = JSON.parse(jsonStr);
+                        if (obj.conversation_id && !conversationId) conversationId = obj.conversation_id;
+                    }
+                } catch (_) { /* ignore */ }
+            }
+        }
         
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
@@ -379,6 +390,7 @@ export class CozeService {
                     if (!jsonStr || jsonStr === '') continue;
                     
                     const messageData = JSON.parse(jsonStr);
+                    if (messageData.conversation_id && !conversationId) conversationId = messageData.conversation_id;
                     console.log('解析SSE数据行，事件:', currentEvent, '数据类型:', typeof messageData, '消息类型:', messageData.msg_type || 'N/A');
                     
                     // 处理 msg_type 格式的消息（Coze API 的新格式）
@@ -767,11 +779,9 @@ export class CozeService {
         }
         
         if (content && content.trim()) {
-            return content;
+            return { output: content, conversation_id: conversationId };
         } else {
             console.warn('SSE解析失败，未找到有效内容');
-            console.warn('SSE流完整内容:', sseText);
-            // 如果没有内容也没有明确的错误，抛出通用错误
             throw new Error('Coze API返回的SSE流中未找到有效内容。请检查工作流配置和参数是否正确。');
         }
     }

@@ -162,6 +162,119 @@ CORS_ORIGIN=https://your-frontend-domain.com
 3. 检查 CORS 配置
 4. 查看浏览器控制台和网络请求
 
+## 🖥️ 火山服务器部署（世恒光）
+
+已在世恒光火山服务器完成部署，端口已开通。
+
+### 访问地址
+
+| 方式 | 地址 |
+|------|------|
+| **域名（推荐）** | `http://markbot.shangbianai.com`（配置 HTTPS 后为 `https://markbot.shangbianai.com`） |
+| **IP + 端口** | 前端 `http://115.190.64.160:8050`，后端 `http://115.190.64.160:3050`（健康检查：`/health`，API 测试：`/api/coze/test`） |
+
+用户访问前端即可，前端通过 Nginx 将 `/api` 反向代理到后端 3050，无需单独访问后端端口。
+
+### HTTPS 配置（markbot.shangbianai.com）
+
+使用项目内脚本在服务器上安装 certbot 并为 **markbot.shangbianai.com** 申请 Let's Encrypt 证书。
+
+1. **将脚本放到服务器并执行**
+
+   ```bash
+   # 本地：上传脚本到服务器
+   scp deploy/setup-https.sh 世恒光火山服务器:/tmp/
+
+   # SSH 登录服务器后执行（需设置 Let's Encrypt 通知邮箱）
+   ssh 世恒光火山服务器
+   sudo chmod +x /tmp/setup-https.sh
+   export CERTBOT_EMAIL=your@email.com   # 替换为实际邮箱
+   sudo -E /tmp/setup-https.sh
+   ```
+
+2. **脚本会完成**
+   - 检查并确认 Nginx 配置存在
+   - 安装 certbot 与 python3-certbot-nginx（若未安装）
+   - 为 markbot.shangbianai.com 申请并部署证书
+   - 自动配置 HTTP → HTTPS 重定向
+   - certbot 续期定时任务由安装包自动配置，到期前会自动续期
+
+3. **验证**
+   - 访问 `https://markbot.shangbianai.com` 应返回 200，证书校验通过
+   - 证书有效期约 90 天，到期前 certbot 会自动续期
+
+### 服务器部署结构
+
+- **项目目录**：`/opt/superip/`
+- **前端静态**：`/opt/superip/frontend/`
+- **后端**：`/opt/superip/backend/`，由 **pm2** 常驻（`PORT=3050`，进程名 `superip-backend`）
+- **Nginx 配置**：`/etc/nginx/conf.d/superip-8050.conf`（监听 8050，根目录为前端，`/api/` 代理到 127.0.0.1:3050）
+
+### 常用命令（SSH 到「世恒光火山服务器」后）
+
+```bash
+# 查看后端状态
+pm2 status superip-backend
+pm2 logs superip-backend
+
+# 重启后端
+cd /opt/superip/backend && pm2 restart superip-backend
+
+# 更新代码后重新部署
+# 本地执行：rsync 同步代码到 世恒光火山服务器:/opt/superip/
+# 服务器执行：
+cd /opt/superip/backend && npm install && npm run build && pm2 restart superip-backend
+# 前端为静态文件，同步后无需重启
+```
+
+## 🖥️ 阿里云服务器部署（放羊哥综合营销智能体）
+
+因域名限制，可将服务部署到阿里云服务器：前端 **8050**、后端 **3050**。
+
+### 前置条件
+
+1. **SSH 配置**：`~/.ssh/config` 中已添加 Host `aliyun`（脚本已包含示例，请取消注释并填写 `IdentityFile` 若使用密钥）。
+2. **能免密登录**：终端执行 `ssh aliyun` 可登录（或先执行 `ssh-copy-id root@182.92.97.169`）。
+
+### 一键部署
+
+在项目根目录（`多智能体/`）下执行：
+
+```bash
+chmod +x deploy/deploy-aliyun.sh
+./deploy/deploy-aliyun.sh
+```
+
+脚本会：同步前端/后端代码到 `/opt/superip`、在服务器安装 Node/Nginx/PM2（若未安装）、构建后端、创建/保留 `.env`、用 PM2 启动后端（3050）、部署 Nginx（8050 + `/api` 代理到 3050）。
+
+### 访问地址
+
+| 用途 | 地址 |
+|------|------|
+| **前端** | `http://182.92.97.169:8050` |
+| **后端健康检查** | `http://182.92.97.169:3050/health` |
+| **API（经 Nginx）** | `http://182.92.97.169:8050/api/coze/...` |
+
+### 配置 Coze
+
+首次部署后若未配置 Token，需登录服务器编辑环境变量并重启后端：
+
+```bash
+ssh aliyun
+vim /opt/superip/backend/.env   # 填写 COZE_TOKEN、COZE_WORKFLOW_ID
+cd /opt/superip/backend && pm2 restart superip-backend
+```
+
+### 常用命令（SSH 到 aliyun 后）
+
+```bash
+pm2 status superip-backend
+pm2 logs superip-backend
+cd /opt/superip/backend && npm install && npm run build && pm2 restart superip-backend
+```
+
+---
+
 ## 🔗 相关链接
 
 - GitHub 仓库：https://github.com/shangbian/superip

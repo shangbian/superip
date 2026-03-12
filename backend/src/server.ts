@@ -9,17 +9,25 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS 配置 - 支持多个来源
+// CORS 配置 - 支持多个来源；开发环境下始终允许本地前端常用端口
 const getCorsOrigin = () => {
     const corsOrigin = process.env.CORS_ORIGIN;
-    
-    // 如果配置了多个来源（用逗号分隔）
-    if (corsOrigin && corsOrigin.includes(',')) {
-        return corsOrigin.split(',').map(origin => origin.trim());
+    const devOrigins = [
+        'http://localhost:8085',
+        'http://127.0.0.1:8085',
+        'http://localhost:8080',
+        'http://127.0.0.1:8080'
+    ];
+    let origins: string[] = [];
+    if (corsOrigin && corsOrigin.trim()) {
+        origins = corsOrigin.split(',').map(o => o.trim()).filter(Boolean);
     }
-    
-    // 单个来源或通配符
-    return corsOrigin || '*';
+    const isDev = process.env.NODE_ENV !== 'production';
+    if (isDev) {
+        devOrigins.forEach(o => { if (!origins.includes(o)) origins.push(o); });
+    }
+    if (origins.length === 0) return '*';
+    return origins.length === 1 ? origins[0] : origins;
 };
 
 // 中间件

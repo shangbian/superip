@@ -9,9 +9,8 @@ router.post('/workflow/execute', async (req: Request, res: Response) => {
     try {
         console.log('收到工作流执行请求:', JSON.stringify(req.body, null, 2));
 
-        const { choice, userInput, topic } = req.body;
+        const { choice, userInput, topic, history, conversation_id: conversationId } = req.body;
 
-        // 验证参数
         if (!choice) {
             return res.status(400).json({
                 success: false,
@@ -26,15 +25,18 @@ router.post('/workflow/execute', async (req: Request, res: Response) => {
             });
         }
 
-        // 调用 Coze 服务，将topic参数传递（如果提供了topic则使用，否则使用userInput的值）
         const topicValue = topic || userInput;
-        const result = await cozeService.executeWorkflow(choice, userInput, topicValue);
-
-        console.log('工作流执行成功，返回结果');
+        const historyList = Array.isArray(history) ? history : undefined;
+        const convId = typeof conversationId === 'string' ? conversationId.trim() || undefined : undefined;
+        const result = await cozeService.executeWorkflow(choice, userInput, topicValue, historyList, convId);
 
         res.json({
             success: true,
-            data: result,
+            data: {
+                output: result.output,
+                raw: result.raw,
+                conversation_id: result.conversation_id
+            },
             message: '工作流执行成功'
         });
 

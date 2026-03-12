@@ -987,6 +987,213 @@
             color: var(--text-secondary);
         }
 
+        /* 对话式界面 */
+        .chat-view {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 70px - 40px);
+            min-height: 420px;
+            background: var(--background);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .chat-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--background-light);
+        }
+        .chat-header h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin: 0;
+        }
+        .chat-header-actions { display: flex; gap: 8px; }
+        .btn-sm { padding: 6px 12px; font-size: 0.85rem; }
+        .chat-placeholder {
+            color: var(--text-light);
+            text-align: center;
+            padding: 24px 16px;
+            font-size: 0.95rem;
+        }
+        .chat-guide-block {
+            background: var(--background-light);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 12px;
+        }
+        .chat-guide-title {
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 12px;
+            font-size: 1rem;
+        }
+        .chat-guide-text {
+            color: var(--text);
+            line-height: 1.7;
+            font-size: 0.95rem;
+            white-space: pre-wrap;
+            margin-bottom: 16px;
+        }
+        .chat-guide-block .chat-placeholder {
+            padding: 12px 0 0;
+            margin-bottom: 0;
+        }
+        /* Coze 风格对话区 */
+        .chat-view.coze-style { display: flex; flex-direction: column; }
+        .coze-chat-header {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 16px; border-bottom: 1px solid var(--border);
+            background: var(--background); flex-shrink: 0;
+        }
+        .coze-back {
+            width: 36px; height: 36px; border: none; border-radius: 8px;
+            background: var(--background-light); color: var(--text-dark);
+            font-size: 1.4rem; line-height: 1; cursor: pointer;
+        }
+        .coze-chat-title-wrap { flex: 1; min-width: 0; }
+        .coze-chat-header h2 { font-size: 1rem; font-weight: 600; margin: 0 0 2px 0; }
+        .coze-chat-subtitle { font-size: 0.75rem; color: var(--text-light); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .coze-header-actions { display: flex; gap: 4px; }
+        .coze-icon-btn {
+            width: 36px; height: 36px; border: none; border-radius: 8px;
+            background: transparent; font-size: 1.1rem; cursor: pointer;
+        }
+        .coze-icon-btn:hover { background: var(--background-light); }
+        .coze-empty-state {
+            padding: 24px 20px; text-align: center; flex-shrink: 0;
+        }
+        .coze-agent-avatar {
+            width: 72px; height: 72px; margin: 0 auto 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px; display: flex; align-items: center; justify-content: center;
+        }
+        .coze-avatar-icon { font-size: 36px; }
+        .coze-agent-title { font-size: 1.15rem; font-weight: 600; margin-bottom: 16px; color: var(--text-dark); }
+        .coze-welcome-bubble {
+            max-width: 90%; margin: 0 auto 20px; padding: 16px 20px;
+            background: var(--background-light); border: 1px solid var(--border);
+            border-radius: 12px; text-align: left; font-size: 0.95rem;
+            line-height: 1.6; color: var(--text);
+        }
+        .coze-suggested-prompts {
+            display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+        }
+        .coze-prompt-chip {
+            padding: 10px 16px; background: var(--background-light);
+            border: 1px solid var(--border); border-radius: 20px;
+            font-size: 0.9rem; color: var(--text); cursor: pointer;
+        }
+        .coze-prompt-chip:hover { border-color: var(--primary); color: var(--primary); }
+        .coze-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+        .coze-loading { display: none; align-items: center; gap: 10px; padding: 10px 16px; flex-shrink: 0; }
+        .coze-loading.active { display: flex; }
+        .coze-stop-wrap { padding: 8px 16px; text-align: center; flex-shrink: 0; }
+        .coze-stop-btn {
+            padding: 8px 20px; font-size: 0.9rem; color: var(--text-light);
+            background: var(--background-light); border: 1px solid var(--border);
+            border-radius: 20px; cursor: pointer;
+        }
+        .coze-stop-btn:hover { color: var(--error); border-color: var(--error); }
+        .coze-input-area {
+            display: flex; gap: 10px; padding: 12px 16px;
+            border-top: 1px solid var(--border); background: var(--background);
+        }
+        .coze-input {
+            flex: 1; padding: 12px 16px; border: 1px solid var(--border);
+            border-radius: 24px; font-size: 0.95rem; resize: none; min-height: 44px;
+        }
+        .coze-input:focus { outline: none; border-color: var(--primary); }
+        .coze-send-btn {
+            padding: 12px 24px; border-radius: 24px; border: none;
+            background: var(--primary); color: white; font-weight: 500; cursor: pointer;
+        }
+        .coze-disclaimer {
+            font-size: 0.75rem; color: var(--text-secondary);
+            text-align: center; padding: 8px 16px; margin: 0;
+        }
+        .chat-intro {
+            padding: 12px 20px;
+            font-size: 0.9rem;
+            color: var(--text-light);
+            background: var(--background-light);
+            border-bottom: 1px solid var(--border-light);
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .chat-message {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .chat-message.user {
+            align-self: flex-end;
+            background: var(--primary);
+            color: white;
+        }
+        .chat-message.assistant {
+            align-self: flex-start;
+            background: var(--background-light);
+            border: 1px solid var(--border);
+            color: var(--text-dark);
+        }
+        .chat-message.assistant .markdown-body { font-size: 0.95rem; }
+        .chat-message.assistant .markdown-body p { margin: 0 0 0.5em 0; }
+        .chat-message.assistant .markdown-body p:last-child { margin-bottom: 0; }
+        .chat-loading {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            border-top: 1px solid var(--border-light);
+            background: var(--background-light);
+        }
+        .chat-loading.active { display: flex; }
+        .chat-input-wrap {
+            display: flex;
+            gap: 12px;
+            padding: 16px 20px;
+            border-top: 1px solid var(--border);
+            background: var(--background);
+        }
+        .chat-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            resize: none;
+            min-height: 44px;
+            max-height: 120px;
+        }
+        .chat-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        .chat-send {
+            align-self: flex-end;
+            min-width: 80px;
+        }
+        @media (max-width: 768px) {
+            .chat-view { height: calc(100vh - 60px - 24px); }
+            .chat-message { max-width: 92%; }
+        }
+
         @media (max-width: 768px) {
             .agents-grid {
                 grid-template-columns: 1fr;
@@ -1068,45 +1275,40 @@
                 </div>
             </div>
 
-            <!-- 智能体信息卡片 -->
-            <div class="glass-card agent-info-card" id="agentInfoCard" style="display: none;">
-                <h2 id="selectedAgentName">请选择一个智能体</h2>
-                <div class="agent-info-box" id="agentInfoBox"></div>
-                
-                <div class="input-group">
-                    <label for="userInput">请输入您的信息：</label>
-                    <textarea id="userInput" placeholder="请根据上方提示输入相关信息..."></textarea>
-                </div>
-                
-                <div class="button-group">
-                    <button class="btn btn-primary" onclick="executeWorkflow()" id="submitBtn">
-                        生成内容
-                    </button>
-                    <button class="btn btn-danger" onclick="clearCurrentHistory()">
-                        🗑️ 清空记录
-                    </button>
-                </div>
-
-                <div class="loading" id="loading">
-                    <div class="loading-spinner"></div>
-                    <p>AI正在为您生成内容，请稍候...</p>
-                </div>
-            </div>
-
-            <!-- 结果展示 -->
-            <div class="result-card" id="resultCard">
-                <div class="result-header">
-                    <h3>✨ 生成结果</h3>
-                    <div class="button-group">
-                        <button class="btn btn-success" onclick="copyResult()">
-                            📋 一键复制
-                        </button>
-                        <button class="btn btn-success" style="background: rgba(245, 158, 11, 0.8); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(245, 158, 11, 0.3);" onclick="copyResultWithInput()">
-                            📝 复制含输入
-                        </button>
+            <!-- 对话式智能体界面（Coze 风格） -->
+            <div class="chat-view coze-style" id="agentInfoCard" style="display: none;">
+                <div class="coze-chat-header">
+                    <button type="button" class="coze-back" onclick="goToHomepage()" aria-label="返回">‹</button>
+                    <div class="coze-chat-title-wrap">
+                        <h2 id="selectedAgentName">请选择一个智能体</h2>
+                        <p class="coze-chat-subtitle" id="cozeChatSubtitle">用户与当前智能体的对话 · 支持流式更新气泡 · 同会话使用 conversation_id 保留上下文</p>
+                    </div>
+                    <div class="coze-header-actions">
+                        <button type="button" class="coze-icon-btn" onclick="copyResult()" title="复制上条回复">📋</button>
+                        <button type="button" class="coze-icon-btn" onclick="clearCurrentHistory()" title="清空对话">🗑️</button>
                     </div>
                 </div>
-                <div id="resultContent" class="result-content"></div>
+                <div class="coze-empty-state" id="cozeEmptyState">
+                    <div class="coze-agent-avatar" id="cozeAgentAvatar">
+                        <span class="coze-avatar-icon">🤖</span>
+                    </div>
+                    <h3 class="coze-agent-title" id="cozeAgentTitle">智能体</h3>
+                    <div class="coze-welcome-bubble" id="cozeWelcomeBubble"></div>
+                    <div class="coze-suggested-prompts" id="cozeSuggestedPrompts"></div>
+                </div>
+                <div class="coze-messages" id="chatMessages"></div>
+                <div class="coze-loading" id="chatLoading">
+                    <div class="loading-spinner"></div>
+                    <p>AI正在回复...</p>
+                </div>
+                <div class="coze-stop-wrap" id="cozeStopWrap" style="display: none;">
+                    <button type="button" class="coze-stop-btn" id="cozeStopBtn" onclick="stopStreaming()">停止响应</button>
+                </div>
+                <div class="coze-input-area">
+                    <textarea id="userInput" class="coze-input" placeholder="发送消息..." rows="1"></textarea>
+                    <button type="button" class="coze-send-btn" onclick="sendChatMessage()" id="submitBtn">发送</button>
+                </div>
+                <p class="coze-disclaimer">内容由AI生成，无法确保真实准确，仅供参考。</p>
             </div>
         </main>
     </div>
