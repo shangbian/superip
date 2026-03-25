@@ -5,26 +5,41 @@ dotenv.config();
 
 export class CozeService {
     private client: AxiosInstance;
+    private clientV3: AxiosInstance | null = null;
     private token: string;
     private workflowId: string;
+    private botId: string;
 
     constructor() {
         this.token = process.env.COZE_TOKEN || '';
         this.workflowId = process.env.COZE_WORKFLOW_ID || '';
+        this.botId = process.env.COZE_BOT_ID || '';
 
-        if (!this.token || !this.workflowId) {
-            throw new Error('Coze Token 或 Workflow ID 未配置');
+        if (!this.token) {
+            throw new Error('Coze Token 未配置，请设置环境变量 COZE_TOKEN');
+        }
+        if (!this.workflowId && !this.botId) {
+            throw new Error('请配置 COZE_WORKFLOW_ID（工作流）或 COZE_BOT_ID（v3 对话）');
         }
 
-        // 创建 axios 实例
+        const authHeaders = {
+            'Authorization': `Bearer ${this.token}`,
+            'Content-Type': 'application/json',
+        };
+
         this.client = axios.create({
             baseURL: 'https://api.coze.cn/v1',
-            timeout: 300000, // 5分钟超时（工作流可能需要较长时间执行）
-            headers: {
-                'Authorization': `Bearer ${this.token}`,
-                'Content-Type': 'application/json',
-            }
+            timeout: 300000,
+            headers: authHeaders
         });
+
+        if (this.botId) {
+            this.clientV3 = axios.create({
+                baseURL: 'https://api.coze.cn',
+                timeout: 300000,
+                headers: authHeaders
+            });
+        }
 
         // 请求拦截器
         this.client.interceptors.request.use(
@@ -52,13 +67,126 @@ export class CozeService {
     }
 
     /**
+     * Coze v3/chat 对话（bot_id 模式，非流式）
+     */
+    private async executeV3Chat(userInput: string, history?: Array<{ role: string; content: string }>, conversationId?: string): Promise<any> {
+        if (!this.clientV3 || !this.botId) throw new Error('v3 客户端或 BOT_ID 未配置');
+        const historyMessages = (history && history.length) ? history.map((m: { role: string; content: string }) => ({
+            content: (m.content || '').trim(),
+            content_type: 'text',
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            type: m.role === 'assistant' ? 'answer' : 'question'
+        })).filter((m: any) => m.content) : [];
+        const requestBody: any = {
+            bot_id: this.botId,
+            user_id: conversationId || 'user_' + Date.now(),
+            stream: false,
+            additional_messages: [
+                ...historyMessages,
+                { content: userInput.trim(), content_type: 'text', role: 'user', type: 'question' }
+            ],
+            parameters: {}
+        };
+        if (conversationId && conversationId.trim()) {
+            requestBody.conversation_id = conversationId.trim();
+        }
+        console.log('[Coze v3/chat] 请求:', { bot_id: this.botId, conversation_id: conversationId || 'new' });
+        const response = await this.clientV3.post('/v3/chat', requestBody);
+        const resData = response.data?.data || response.data;
+        const chatId = resData?.id;
+        const convId = resData?.conversation_id || response.data?.data?.conversation_id;
+        const status = resData?.status;
+        if (status === 'completed') {
+            return this.parseV3Response(response.data);
+        }
+        if (status === 'in_progress' && chatId && convId) {
+            const pollResult = await this.pollV3ChatResult(convId, chatId);
+            return this.parseV3Response(pollResult);
+        }
+        return this.parseV3Response(response.data);
+    }
+
+    private async pollV3ChatResult(conversationId: string, chatId: string): Promise<any> {
+        const maxWait = 120000;
+        const interval = 2000;
+        const start = Date.now();
+        while (Date.now() - start < maxWait) {
+            await new Promise(r => setTimeout(r, interval));
+            const res = await this.clientV3!.get('/v3/chat/retrieve', {
+                params: { conversation_id: conversationId, chat_id: chatId }
+            });
+            const d = res.data?.data || res.data;
+            const status = d?.status;
+            console.log('[Coze v3] 轮询 retrieve status:', status);
+            if (status === 'completed') {
+                const listRes = await this.clientV3!.get('/v3/chat/message/list', {
+                    params: { conversation_id: conversationId, chat_id: chatId }
+                });
+                const listData = listRes.data?.data || listRes.data;
+                return { data: { conversation_id: conversationId, messages: listData?.messages || listData?.data || [] } };
+            }
+            if (status === 'failed') {
+                const err = d?.last_error;
+                const msg = err?.msg || '对话执行失败';
+                console.error('[Coze v3] 对话失败:', msg, 'code:', err?.code);
+                throw new Error('Coze 对话失败：' + msg + '。请在扣子平台检查该 Bot 的必填参数与配置。');
+            }
+        }
+        throw new Error('对话超时，未在约定时间内完成');
+    }
+
+    private parseV3Response(data: any): { output: string; conversation_id?: string; raw?: any } {
+        const result: any = { output: '', raw: data };
+        if (!data) return result;
+        const d = data.data || data;
+        if (data.conversation_id) result.conversation_id = data.conversation_id;
+        if (d && d.conversation_id) result.conversation_id = d.conversation_id;
+        const msg = data.message || (d && d.message);
+        if (msg && typeof msg.content === 'string') {
+            result.output = msg.content;
+            return result;
+        }
+        if (msg && msg.content && typeof msg.content === 'object' && msg.content.text) {
+            result.output = msg.content.text;
+            return result;
+        }
+        if (msg && msg.content && typeof msg.content === 'object' && typeof msg.content.content !== 'undefined') {
+            result.output = typeof msg.content.content === 'string' ? msg.content.content : JSON.stringify(msg.content.content);
+            return result;
+        }
+        const messages = d?.messages || d?.data;
+        if (Array.isArray(messages) && messages.length > 0) {
+            for (let i = messages.length - 1; i >= 0; i--) {
+                const m = messages[i];
+                if (m.role === 'assistant' && (m.content || m.text)) {
+                    result.output = typeof m.content === 'string' ? m.content : (m.text || JSON.stringify(m.content));
+                    break;
+                }
+            }
+            if (result.output) return result;
+        }
+        try {
+            const parsed = this.parseResponse(data);
+            if (parsed.output) result.output = parsed.output;
+            if (parsed.conversation_id) result.conversation_id = parsed.conversation_id;
+        } catch (e) {
+            console.error('[Coze v3] parseResponse 回退失败，原始响应:', JSON.stringify(data).substring(0, 500));
+        }
+        return result;
+    }
+
+    /**
      * 执行工作流（支持多轮对话与会话保持）
      * @param history 可选，多轮历史消息
      * @param conversationId 可选，首次不传则 API 创建新会话并返回；后续传入以保留上下文
      */
     async executeWorkflow(choice: number, userInput: string, topic?: string, history?: Array<{ role: string; content: string }>, conversationId?: string): Promise<any> {
         try {
-            console.log('准备调用 Coze API...');
+            if (this.botId && this.clientV3) {
+                return await this.executeV3Chat(userInput, history, conversationId);
+            }
+
+            console.log('准备调用 Coze API (Workflow)...');
             console.log('参数:', { 
                 choice, 
                 userInput: userInput.substring(0, 100) + '...',
@@ -66,15 +194,12 @@ export class CozeService {
                 historyLength: history ? history.length : 0
             });
 
-            // 构建parameters对象，包含工作流定义的所有必需输入参数
-            // 根据正确的入参格式，需要以下参数：
-            // - USER_INPUT (String): 用户输入
-            // - choice (Integer): 智能体选择
-            // - topic (String): 主题（取 USER_INPUT 的值）
+            // 构建 parameters，与扣子工作流入参一致（含 CONVERSATION_NAME 等）
             const parameters: any = {
+                CONVERSATION_NAME: process.env.COZE_CONVERSATION_NAME || 'Default',
                 USER_INPUT: userInput.trim(),
-                choice: Number(choice),  // 确保是整数类型
-                topic: (topic && topic.trim()) ? topic.trim() : userInput.trim()  // topic 取 USER_INPUT 的值
+                choice: Number(choice),
+                topic: (topic && topic.trim()) ? topic.trim() : userInput.trim()
             };
             
             // 确保 parameters 不为空对象（如果工作流需要参数但未提供，可能导致错误）
@@ -793,7 +918,8 @@ export class CozeService {
         return {
             status: 'ok',
             token: this.token ? '已配置' : '未配置',
-            workflowId: this.workflowId || '未配置'
+            workflowId: this.workflowId || '未配置',
+            botId: this.botId || '未配置'
         };
     }
 }
