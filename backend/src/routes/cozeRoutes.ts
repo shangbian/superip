@@ -42,10 +42,21 @@ router.post('/workflow/execute', async (req: Request, res: Response) => {
 
     } catch (error: any) {
         console.error('工作流执行失败:', error);
+        const msg = (error && error.message) ? String(error.message) : '工作流执行失败';
+        const code = (error && error.code) ? String(error.code) : '';
 
-        res.status(500).json({
+        // 把可预期的外部依赖故障映射为更准确的 HTTP 状态，前端可按状态给出友好提示
+        const isTimeout = msg.includes('超时') || msg.toLowerCase().includes('timeout') || code === 'ECONNABORTED';
+        const isNetwork =
+            msg.includes('无法连接 Coze API') ||
+            msg.includes('网络错误') ||
+            ['ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(code);
+
+        const statusCode = isTimeout ? 504 : (isNetwork ? 502 : 500);
+
+        res.status(statusCode).json({
             success: false,
-            message: error.message || '工作流执行失败',
+            message: msg,
             error: process.env.NODE_ENV === 'development' ? error : undefined
         });
     }

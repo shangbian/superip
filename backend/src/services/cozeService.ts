@@ -181,7 +181,6 @@ export class CozeService {
      * @param conversationId 可选，首次不传则 API 创建新会话并返回；后续传入以保留上下文
      */
     async executeWorkflow(choice: number, userInput: string, topic?: string, history?: Array<{ role: string; content: string }>, conversationId?: string): Promise<any> {
-        try {
             if (this.botId && this.clientV3) {
                 return await this.executeV3Chat(userInput, history, conversationId);
             }
@@ -279,58 +278,86 @@ export class CozeService {
 -d '${JSON.stringify(requestBody)}'`;
             console.log('等效的 curl 命令:', curlCommand);
             
-            const response = await this.client.post('/workflows/chat', requestBody);
+            // 自动重试：最多3次，针对 Coze 服务端暂时故障（server issues / 5xx / 网络抖动）
+            const MAX_RETRIES = 3;
+            let lastError: any = null;
 
-            console.log('Coze API 返回状态:', response.status);
-            console.log('Coze API 响应头:', response.headers);
-            console.log('Coze API Content-Type:', response.headers['content-type']);
-            console.log('Coze API 返回数据类型:', typeof response.data);
-            console.log('Coze API 返回数据键:', response.data ? Object.keys(response.data) : 'null');
-            console.log('Coze API 返回数据（完整）:', JSON.stringify(response.data, null, 2));
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                    if (attempt > 1) {
+                        const delayMs = attempt * 2000; // 2s / 4s 退避
+                        console.log(`第 ${attempt} 次重试，等待 ${delayMs}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delayMs));
+                    }
 
-            const parsedResult = this.parseResponse(response.data);
-            if (parsedResult.conversation_id) {
-                console.log('会话 ID:', parsedResult.conversation_id);
+                    const response = await this.client.post('/workflows/chat', requestBody);
+
+                    console.log('Coze API 返回状态:', response.status);
+                    console.log('Coze API 返回数据（完整）:', JSON.stringify(response.data, null, 2));
+
+                    const parsedResult = this.parseResponse(response.data);
+                    if (parsedResult.conversation_id) {
+                        console.log('会话 ID:', parsedResult.conversation_id);
+                    }
+                    if (attempt > 1) {
+                        console.log(`第 ${attempt} 次重试成功`);
+                    }
+                    return parsedResult;
+
+                } catch (err: any) {
+                    lastError = err;
+                    const msg: string = err.message || '';
+                    const status: number = err.response?.status || 0;
+
+                    // 不可重试的错误：直接抛出
+                    const notRetryable =
+                        status === 400 || status === 401 || status === 403 ||
+                        msg.includes('Missing required') || msg.includes('authentication is invalid') ||
+                        msg.includes('Workflow ID') || msg.includes('userInput');
+                    if (notRetryable) {
+                        console.error(`不可重试错误（attempt ${attempt}）:`, msg);
+                        break;
+                    }
+
+                    // 可重试：Coze 服务器故障 / 网络超时 / 5xx
+                    const retryable =
+                        msg.includes('server issues') || msg.includes('currently experiencing') ||
+                        msg.includes('ECONNABORTED') || msg.includes('timeout') ||
+                        msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') ||
+                        status === 429 || status === 500 || status === 502 || status === 503 || status === 504 ||
+                        err.code === 'ECONNABORTED';
+
+                    if (retryable && attempt < MAX_RETRIES) {
+                        console.warn(`Coze API 暂时故障（attempt ${attempt}/${MAX_RETRIES}），即将重试: ${msg.substring(0, 100)}`);
+                        continue;
+                    }
+                    // 最后一次也失败，退出循环
+                    break;
+                }
             }
-            return parsedResult;
 
-        } catch (error: any) {
-            console.error('========== Coze API 调用失败 ==========');
-            console.error('错误类型:', error.name);
-            console.error('错误消息:', error.message);
-            
-            // 检查是否是超时错误
-            if (error.code === 'ECONNABORTED' || error.message.includes('timeout') || error.message.includes('超时')) {
-                console.error('工作流执行超时');
-                throw new Error('工作流执行超时。工作流可能需要较长时间才能完成，请稍后重试。如果问题持续存在，请检查工作流配置或联系管理员。');
+            // 所有重试均失败，统一处理错误
+            const error = lastError;
+            console.error('========== Coze API 调用失败（已重试 ' + MAX_RETRIES + ' 次）==========');
+            console.error('错误类型:', error?.name);
+            console.error('错误消息:', error?.message);
+
+            if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout') || error?.message?.includes('超时')) {
+                throw new Error('AI 响应超时，请稍后重试');
             }
-            
-            if (error.response) {
+            if (error?.response) {
                 console.error('响应状态:', error.response.status);
                 console.error('响应数据:', JSON.stringify(error.response.data, null, 2));
-                console.error('响应头:', JSON.stringify(error.response.headers, null, 2));
-                
-                // 如果是 400 错误，可能是参数问题
-                if (error.response.status === 400) {
-                    console.error('400 错误 - 可能是参数问题');
-                    console.error('请检查发送的 parameters 是否与工作流配置匹配');
-                }
-                
-                // 检查响应中是否包含超时错误
                 const responseData = error.response.data;
-                if (responseData && (responseData.msg?.includes('timeout') || responseData.msg?.includes('超时') || responseData.message?.includes('timeout') || responseData.message?.includes('超时'))) {
-                    throw new Error('工作流执行超时。工作流可能需要较长时间才能完成，请稍后重试。如果问题持续存在，请检查工作流配置或联系管理员。');
+                if (responseData?.msg?.includes('timeout') || responseData?.msg?.includes('超时')) {
+                    throw new Error('AI 响应超时，请稍后重试');
                 }
-                
-                throw new Error(`API错误 (${error.response.status}): ${error.response.data?.msg || error.response.statusText || JSON.stringify(error.response.data)}`);
-            } else if (error.request) {
-                console.error('请求对象:', error.request);
-                throw new Error('网络错误: 无法连接到 Coze API');
+                throw new Error(`API错误 (${error.response.status}): ${responseData?.msg || error.response.statusText}`);
+            } else if (error?.request) {
+                throw new Error('网络错误：无法连接 Coze API，请检查网络');
             } else {
-                console.error('错误详情:', error);
-                throw new Error(`请求错误: ${error.message}`);
+                throw new Error(`请求错误: ${error?.message || '未知错误'}`);
             }
-        }
     }
 
     /**
@@ -671,19 +698,20 @@ export class CozeService {
                         }
                         
                         if (messageContent) {
-                            // 处理转义的换行符
-                            const cleanContent = messageContent.replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
-                            // 检查是否已添加过相同内容
-                            if (cleanContent && !contentFragments.has(cleanContent)) {
-                                contentFragments.add(cleanContent);
-                                if (content) {
-                                    content += '\n\n' + cleanContent;
+                            const cleanContent = messageContent.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                            if (cleanContent) {
+                                if (currentEvent === 'conversation.message.completed') {
+                                    // completed 事件携带完整内容，直接作为权威输出覆盖已有的 delta 碎片
+                                    const trimmed = cleanContent.trim();
+                                    if (trimmed) {
+                                        content = trimmed;
+                                        console.log('conversation.message.completed 完整内容已覆盖，长度:', content.length);
+                                    }
                                 } else {
-                                    content = cleanContent;
+                                    // delta 事件是流式碎片，必须直接拼接（不加分隔符），否则会在词中产生错误换行
+                                    content += cleanContent;
+                                    console.log('提取到内容，当前总长度:', content.length);
                                 }
-                                console.log('提取到内容，当前总长度:', content.length);
-                            } else {
-                                console.log('跳过重复的内容');
                             }
                         }
                     }
