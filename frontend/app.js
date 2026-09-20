@@ -47,7 +47,8 @@ const allAgentsMap = {
     33: { id: 33, name: '个人IP起号视频文案（商机共享从业者）', description: '为商机共享从业者生成起号视频文案', fullDescription: '功能定义：为商机共享行业的资深从业者生成个人IP起号视频文案。', inputGuide: '基本信息：\n- 身份定位：\n- 转变历程：\n- 时间跨度：\n- 核心成果：', welcomeMessage: '填写身份定位、转变历程、时间跨度与核心成果，生成商机共享从业者向个人 IP 起号视频文案。', suggestedPrompts: ['身份：商机共享顾问，从传统行业转型，服务500+企业', '我从传统行业转向商机共享', '帮我生成起号文案'] },
     34: { id: 34, name: '大会邀约', description: '定制高吸引力大会邀约短视频脚本', fullDescription: '功能定义：自动生成大会邀约短视频文案。', inputGuide: '请提供活动信息，时间，地点，主题，亮点，我将先为您生成5条完整文案供确认', welcomeMessage: '提供活动时间、地点、主题、亮点等信息，先输出 5 条大会邀约短视频脚本稿供选用与修改。', suggestedPrompts: ['大会主题：企业创新转型峰会', '帮我生成5条邀约文案'], functionDef: '输入大会核心信息，定制5条高吸引力短视频脚本，赋能大会引流邀约' },
     35: { id: 35, name: '行业痛点短视频脚本', description: '生成适配行业痛点的场景化短视频脚本', fullDescription: '功能定义：选择对应行业（如医疗健康 / 消费生活），输入产品核心卖点，生成适配该行业用户痛点的场景化短视频脚本（含剧情、台词、镜头建议）。', inputGuide: '请提供以下信息（按格式填写）：\n→ [具体行业] + [核心产品/服务] + [核心目标人群] + [产品核心卖点1-3个]', welcomeMessage: '按格式发送：[具体行业] + [核心产品/服务] + [核心目标人群] + [核心卖点 1–3 个]，生成痛点场景短视频脚本。', suggestedPrompts: ['企业服务+商机平台+中小企业主+低成本获客', '教育行业+AI学习平台+家长群体+提升孩子成绩', '帮我生成痛点脚本'] },
-    36: { id: 36, name: '短视频脚本平台适配', description: '自动调整脚本风格，适配多平台发布', fullDescription: '功能定义：选择发布平台（抖音 / 视频号 / 快手），输入基础视频脚本，自动调整内容风格、节奏、话术。', inputGuide: '输入原始脚本内容，以及要发布的平台（抖音 / 视频号 / 快手 / 小红书）', welcomeMessage: '发送原始脚本，并注明发布平台（抖音 / 视频号 / 快手 / 小红书），自动调整语气、节奏与话术结构。', suggestedPrompts: ['帮我适配到抖音风格', '帮我适配到视频号风格', '帮我适配到小红书风格'] }
+    36: { id: 36, name: '短视频脚本平台适配', description: '自动调整脚本风格，适配多平台发布', fullDescription: '功能定义：选择发布平台（抖音 / 视频号 / 快手），输入基础视频脚本，自动调整内容风格、节奏、话术。', inputGuide: '输入原始脚本内容，以及要发布的平台（抖音 / 视频号 / 快手 / 小红书）', welcomeMessage: '发送原始脚本，并注明发布平台（抖音 / 视频号 / 快手 / 小红书），自动调整语气、节奏与话术结构。', suggestedPrompts: ['帮我适配到抖音风格', '帮我适配到视频号风格', '帮我适配到小红书风格'] },
+    37: { id: 37, name: '老板对接', description: '一键生成老板对接产品的大会邀约文案', fullDescription: '功能定义：根据大会名称、地点与主题，生成适用于老板对接产品的大会邀约文案。', inputGuide: '请输入大会名称、地点、主题，为你输出老板对接产品的大会邀约文案', welcomeMessage: '请输入大会名称、地点、主题，为你输出老板对接产品的大会邀约文案', suggestedPrompts: ['大会名称：企业家资源对接会', '地点：北京', '主题：老板对接产品大会'] }
 };
 
 // 按业务分类组织的智能体数据（4大分类）
@@ -57,7 +58,8 @@ const agentsData = {
         allAgentsMap[18],
         allAgentsMap[19],
         allAgentsMap[20],
-        allAgentsMap[21]
+        allAgentsMap[21],
+        allAgentsMap[37]
     ],
     '爆款工厂': [
         allAgentsMap[15],
@@ -94,10 +96,10 @@ const agentsData = {
     ]
 };
 
-// 热门推荐：固定 4 个，顺序不变，不做动态调整
-const hotRecommendedAgentIds = [34, 3, 4, 24];
+// 热门推荐：固定顺序，不做动态调整
+const hotRecommendedAgentIds = [34, 3, 4, 24, 37];
 // 各版块重点智能体（名称旁显示「推荐」）
-const RECOMMENDED_AGENT_IDS = [1, 18, 34, 14, 23, 13, 3, 4, 25, 24];
+const RECOMMENDED_AGENT_IDS = [1, 18, 37, 34, 14, 23, 13, 3, 4, 25, 24];
 function agentHasRecBadge(agentId) {
     return RECOMMENDED_AGENT_IDS.indexOf(Number(agentId)) !== -1;
 }
@@ -134,6 +136,61 @@ function resolveWorkflowChoice(agentId) {
         return WORKFLOW_CHOICE_OVERRIDE[n];
     }
     return n;
+}
+
+// 专用深链：?agent=34 或 ?agent=dahuiyaoyue 等，打开后直达对应智能体对话页
+var AGENT_DEEP_LINK_SLUGS = {
+    dahuiyaoyue: 34,
+    pengyouquan: 24
+};
+
+function resolveAgentIdFromUrlParam(value) {
+    if (value == null || value === '') return null;
+    var raw = String(value).trim();
+    if (!raw) return null;
+    if (Object.prototype.hasOwnProperty.call(AGENT_DEEP_LINK_SLUGS, raw)) return AGENT_DEEP_LINK_SLUGS[raw];
+    var n = parseInt(raw, 10);
+    if (!isNaN(n) && allAgentsMap[n]) return n;
+    return null;
+}
+
+function getAgentIdFromUrl() {
+    var params = new URLSearchParams(window.location.search);
+    return resolveAgentIdFromUrlParam(params.get('agent') || params.get('id'));
+}
+
+function updateAgentUrl(agentId) {
+    try {
+        var url = new URL(window.location.href);
+        url.searchParams.set('agent', String(agentId));
+        url.searchParams.delete('id');
+        window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    } catch (e) { /* ignore */ }
+}
+
+function clearAgentUrl() {
+    try {
+        var url = new URL(window.location.href);
+        url.searchParams.delete('agent');
+        url.searchParams.delete('id');
+        var next = url.pathname + url.search + url.hash;
+        window.history.replaceState(null, '', next || '/');
+    } catch (e) { /* ignore */ }
+}
+
+function openAgentById(agentId) {
+    var agent = allAgentsMap[agentId] || allAgents.find(function (a) { return a.id === agentId; });
+    if (!agent) return false;
+    var fullAgent = allAgents.find(function (a) { return a.id === agent.id; }) || agent;
+    switchAgent(fullAgent);
+    updateAgentUrl(fullAgent.id);
+    return true;
+}
+
+function openAgentFromUrl() {
+    var agentId = getAgentIdFromUrl();
+    if (agentId == null) return;
+    if (!openAgentById(agentId)) console.warn('URL 中的 agent 参数无效:', agentId);
 }
 let searchResults = [];
 let selectedSearchIndex = -1;
@@ -945,6 +1002,7 @@ function switchAgent(agent, saveCurrent) {
     renderChatMessages(agent.id);
     renderSidebar();
     closeSidebar();
+    updateAgentUrl(agent.id);
 }
 
 // 切换智能体提示
@@ -1654,6 +1712,7 @@ function goToHomepage() {
     
     // 清空当前智能体
     currentAgent = null;
+    clearAgentUrl();
     
     document.getElementById('agentInfoCard').style.display = 'none';
     document.getElementById('homepageGuide').style.display = 'block';
@@ -1746,7 +1805,20 @@ function initializePage() {
     var stopBtn = document.getElementById('cozeStopBtn');
     if (stopBtn) stopBtn.addEventListener('click', function () { if (typeof stopStreaming === 'function') stopStreaming(); });
 
+    // 所有页面结构和智能体数据准备完成后，再根据 URL 进入指定智能体。
+    openAgentFromUrl();
+
 }
 
 // 页面加载完成后初始化
 window.onload = initializePage;
+
+// 支持浏览器前进/后退时同步页面与地址栏。
+window.addEventListener('popstate', function () {
+    var agentId = getAgentIdFromUrl();
+    if (agentId == null) {
+        goToHomepage();
+        return;
+    }
+    openAgentById(agentId);
+});
